@@ -1,0 +1,14 @@
+name: Deno
+on:
+  push:
+    branches: [main]
+  pull_request:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: denoland/setup-deno@v1
+      - run: deno fmt --check
+      - run: deno lint
+      - run: deno test
