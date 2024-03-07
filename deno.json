@@ -1,5 +1,5 @@
 {
   "tasks": {
-    "quitch": "deno run --allow-read main.ts"
+    "quitch": "deno run --allow-read --allow-net main.ts"
   }
 }

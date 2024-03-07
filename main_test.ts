@@ -1,6 +1,11 @@
 import { assertEquals } from "https://deno.land/std@0.218.2/assert/mod.ts";
 import * as Change from "./change.ts";
-import { change_digest, format_change } from "./main.ts";
+import {
+  change_digest,
+  format_change,
+  parse_connection_string,
+} from "./main.ts";
+import { ok } from "./result.ts";
 
 Deno.test("format change for a digest", () => {
   const formatted_change = format_change("quitch", Change.example);
@@ -41,5 +46,18 @@ Deno.test("digest for change with unicode characters", async () => {
   assertEquals(
     await change_digest("quitch", change, undefined),
     "fb29c4f840ce9cd266d983a2c90d7ddf745c1711",
+  );
+});
+
+Deno.test("parse connection string", () => {
+  assertEquals(
+    parse_connection_string("mysql://user:password@localhost:3306/dbname"),
+    ok({
+      hostname: "localhost",
+      port: 3306,
+      username: "user",
+      password: "password",
+      db: "dbname",
+    }),
   );
 });
