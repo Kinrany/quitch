@@ -7,7 +7,42 @@ export type Change = {
   planner: string;
 };
 
-export function parse(change: string): Result<Change> {
+export function format(
+  project: string,
+  change: Change,
+  parent?: string,
+): string {
+  let str = "";
+  str += `project ${project}\n`;
+  str += `change ${change.name}\n`;
+  if (parent) {
+    str += `parent ${parent}\n`;
+  }
+  str += `planner ${change.planner}\n`;
+  str += `date ${format_line_date(change.date)}\n`;
+  str += "\n";
+  str += `${change.note}`;
+  return str;
+}
+
+export async function id(
+  project: string,
+  change: Change,
+  parent?: string,
+): Promise<string> {
+  const encode = (s: string) => new TextEncoder().encode(s);
+
+  const change_str = format(project, change, parent);
+  const bytes = encode(`change ${encode(change_str).length}\0${change_str}`);
+  const hash_buffer = await crypto.subtle.digest("SHA-1", bytes);
+  const hash_array = Array.from(new Uint8Array(hash_buffer));
+  const hash_hex = hash_array
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+  return hash_hex;
+}
+
+export function parse_line(change: string): Result<Change> {
   const error = (m: string) => err(new Error(`Invalid change format: ${m}`));
 
   const name_end_idx = change.indexOf(" ");
@@ -44,22 +79,29 @@ export function parse(change: string): Result<Change> {
   });
 }
 
-export function format(change: Change): string {
-  const date = format_date(change.date);
+export function format_line(change: Change): string {
+  const date = format_line_date(change.date);
   const note = change.note.replaceAll("\n", "\\n");
   return `${change.name} ${date} ${change.planner} # ${note}`;
 }
 
-export function format_date(date: Date): string {
+export function format_line_date(date: Date): string {
   return date.toISOString().slice(0, 19) + "Z";
 }
 
 export const example: Change = {
+  date: new Date("2024-03-07T03:19:34Z"),
   name: "change_name",
   note: "A description of the change",
-  date: new Date("2024-03-07T03:19:34Z"),
   planner: "Ruslan Fadeev <github@kinrany.dev>",
 };
 
-export const example_string =
+export const example_string = `project quitch
+change change_name
+planner Ruslan Fadeev <github@kinrany.dev>
+date 2024-03-07T03:19:34Z
+
+A description of the change`;
+
+export const example_line =
   "change_name 2024-03-07T03:19:34Z Ruslan Fadeev <github@kinrany.dev> # A description of the change";

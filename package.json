@@ -1,0 +1,19 @@
+{
+  "name": "quitch",
+  "version": "0.0.1",
+  "description": "An attempt to reimplement parts of sqitch",
+  "main": "main.ts",
+  "scripts": {
+    "test": "deno test"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Kinrany/quitch.git"
+  },
+  "author": "Ruslan Fadeev <github@kinrany.dev>",
+  "license": "UNLICENSED",
+  "bugs": {
+    "url": "https://github.com/Kinrany/quitch/issues"
+  },
+  "homepage": "https://github.com/Kinrany/quitch#readme"
+}

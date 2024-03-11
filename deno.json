@@ -1,4 +1,7 @@
 {
+  "name": "@kinrany/quitch",
+  "version": "0.0.1",
+  "exports": "./main.ts",
   "tasks": {
     "quitch": "deno run --allow-read --allow-net main.ts"
   }
