@@ -12,7 +12,7 @@ An attempt to reimplement parts of sqitch
 ### Deno
 
 1. [Install Deno](https://docs.deno.com/runtime/manual)
-2. `deno install --allow-read --allow-net https://deno.land/x/quitch@v0.0.1/main.ts`
+2. `deno install --allow-read --allow-net https://deno.land/x/quitch@v0.0.3/main.ts`
 3. Run `export PATH="$HOME/.deno/bin:$PATH"` to make available in the current
    shell
 4. Add `export PATH="$HOME/.deno/bin:$PATH"` to your `~/.bashrc` or `~/.zshrc`
