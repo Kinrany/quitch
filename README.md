@@ -22,7 +22,7 @@ An attempt to reimplement parts of sqitch
 1. [Install Rust](https://rustup.rs/)
 2. `cargo install quitch`
 
-### Use
+## Use
 
 ```bash
 # Revert the last change
