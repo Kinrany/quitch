@@ -31,7 +31,6 @@ export function parse(plan_text: string): Result<Plan> {
         return [line.slice(0, idx), line.slice(idx + 1)];
       }
     });
-  new Map();
   const metadata = new Map(meta_entries);
   const project = metadata.get("project") || "";
 

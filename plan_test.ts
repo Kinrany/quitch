@@ -29,7 +29,7 @@ Deno.test("Plan.full_changes", async () => {
       id: "da41a550b0cba5bd3dffbf645032a98ae1136da5",
     },
     {
-      date: new Date("2024-03-10T00:04:24.000Z"),
+      date: new Date("2024-03-10T00:04:24Z"),
       name: "change_num2",
       note: "Second change",
       planner: "Ruslan Fadeev <github@kinrany.dev>",

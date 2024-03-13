@@ -4,5 +4,6 @@
   "exports": "./main.ts",
   "tasks": {
     "quitch": "deno run --allow-read --allow-net main.ts"
-  }
+  },
+  "exclude": ["target/**"]
 }

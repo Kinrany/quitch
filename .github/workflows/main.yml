@@ -4,11 +4,23 @@ on:
     branches: [main]
   pull_request:
 jobs:
-  test:
+  test-deno:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
       - uses: denoland/setup-deno@v1
       - run: deno fmt --check
       - run: deno lint
+      - run: deno check main.ts
       - run: deno test
+  test-rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+      - run: cargo fmt --check
+      - run: cargo check --all-targets --all-features
+      - run: cargo clippy --all-targets --all-features -- -D warnings
+      - run: cargo test --all-features

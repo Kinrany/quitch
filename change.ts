@@ -60,15 +60,15 @@ export function parse_line(change: string): Result<Change> {
   }
   change = change.slice(date_end_idx).trimStart();
 
-  const author_end_idx = change.indexOf("#");
+  const planner_end_idx = change.indexOf("#");
   let planner;
   let note;
-  if (author_end_idx === -1) {
+  if (planner_end_idx === -1) {
     planner = change;
     note = "";
   } else {
-    planner = change.slice(0, author_end_idx).trim();
-    note = change.slice(author_end_idx + 1).trim().replaceAll("\\n", "\n");
+    planner = change.slice(0, planner_end_idx).trim();
+    note = change.slice(planner_end_idx + 1).trim().replaceAll("\\n", "\n");
   }
 
   return ok({

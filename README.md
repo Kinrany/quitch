@@ -7,7 +7,9 @@ An attempt to reimplement parts of sqitch
 > Africa. It has been brought into other mild northern climates for forage or
 > erosion control, but is often considered a weed.
 
-## Installation
+## Install
+
+### Deno
 
 1. [Install Deno](https://docs.deno.com/runtime/manual)
 2. `deno install --allow-read --allow-net https://deno.land/x/quitch@v0.0.1/main.ts`
@@ -15,7 +17,12 @@ An attempt to reimplement parts of sqitch
    shell
 4. Add `export PATH="$HOME/.deno/bin:$PATH"` to your `~/.bashrc` or `~/.zshrc`
 
-## Usage
+### Rust
+
+1. [Install Rust](https://rustup.rs/)
+2. `cargo install quitch`
+
+### Use
 
 ```bash
 # Revert the last change
