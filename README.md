@@ -9,6 +9,14 @@ An attempt to reimplement parts of sqitch
 
 ## Install
 
+Two implementations are available. The one in Rust is new and more promising,
+the one in Deno has one more command but will probably be removed eventually.
+
+### Rust
+
+1. [Install Rust](https://rustup.rs/)
+2. `cargo install quitch`
+
 ### Deno
 
 1. [Install Deno](https://docs.deno.com/runtime/manual)
@@ -16,11 +24,6 @@ An attempt to reimplement parts of sqitch
 3. Run `export PATH="$HOME/.deno/bin:$PATH"` to make available in the current
    shell
 4. Add `export PATH="$HOME/.deno/bin:$PATH"` to your `~/.bashrc` or `~/.zshrc`
-
-### Rust
-
-1. [Install Rust](https://rustup.rs/)
-2. `cargo install quitch`
 
 ## Use
 

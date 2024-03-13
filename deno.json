@@ -5,5 +5,5 @@
   "tasks": {
     "quitch": "deno run --allow-read --allow-net main.ts"
   },
-  "exclude": ["target/**"]
+  "exclude": ["target/**/*.*"]
 }
