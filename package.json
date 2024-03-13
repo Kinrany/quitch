@@ -1,6 +1,6 @@
 {
   "name": "quitch",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "description": "An attempt to reimplement parts of sqitch",
   "main": "main.ts",
   "scripts": {
