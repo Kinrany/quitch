@@ -1,5 +1,5 @@
 import * as Change from "./change.ts";
-import { err, ok, Result } from "./result.ts";
+import { err, ok, type Result } from "./result.ts";
 
 export type Plan = {
   project: string;

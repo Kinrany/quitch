@@ -1,4 +1,4 @@
-import { err, ok, Result } from "./result.ts";
+import { err, ok, type Result } from "./result.ts";
 
 export type Change = {
   name: string;
