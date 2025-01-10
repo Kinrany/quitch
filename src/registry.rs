@@ -1,6 +1,7 @@
 use chrono::{DateTime, Utc};
 
 #[derive(Clone, Debug, sqlx::FromRow)]
+#[expect(dead_code)]
 pub struct ChangeRow {
     pub change_id: String,
     pub script_hash: Option<String>,

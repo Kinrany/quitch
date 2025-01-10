@@ -2,13 +2,14 @@ import { parseArgs } from "https://deno.land/std@0.218.2/cli/mod.ts";
 import * as Path from "https://deno.land/std@0.218.2/path/mod.ts";
 import {
   Client,
-  ClientConfig,
-  Connection,
+  type ClientConfig,
+  type Connection,
 } from "https://deno.land/x/mysql@v2.12.1/mod.ts";
+
 import * as Change from "./change.ts";
 import * as Plan from "./plan.ts";
-import { ChangeRow } from "./registry.ts";
-import { err, ok, Result, unwrap } from "./result.ts";
+import type { ChangeRow } from "./registry.ts";
+import { err, ok, type Result, unwrap } from "./result.ts";
 import schema from "./schema.ts";
 
 async function load_plan(plan_file_path: string): Promise<Plan.Plan> {
