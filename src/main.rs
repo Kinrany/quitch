@@ -13,7 +13,7 @@ use sqlx::{Executor, MySqlPool};
 
 use self::{
     plan::{FullChange, Plan},
-    registry::Registry,
+    registry::{Event, Registry},
 };
 
 async fn load_plan(plan_file_path: &str) -> anyhow::Result<Plan> {
@@ -128,15 +128,6 @@ async fn connect(
     }
 
     Ok((db_client, registry))
-}
-
-#[derive(Debug, sqlx::Type)]
-#[sqlx(rename_all = "lowercase")]
-enum Event {
-    Deploy,
-    Fail,
-    Merge,
-    Revert,
 }
 
 async fn revert(

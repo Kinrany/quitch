@@ -4,7 +4,16 @@ use chrono::{DateTime, Utc};
 use futures::StreamExt;
 use sqlx::{Executor, MySqlPool};
 
-use crate::{Event, FullChange, Plan};
+use crate::{FullChange, Plan};
+
+#[derive(Clone, Copy, Debug, sqlx::Type)]
+#[sqlx(rename_all = "lowercase")]
+pub enum Event {
+    Deploy,
+    Fail,
+    Merge,
+    Revert,
+}
 
 pub struct Registry {
     pool: MySqlPool,
@@ -34,7 +43,7 @@ impl Registry {
             .await?;
         let mut change_map: HashMap<_, _> = change_rows
             .into_iter()
-            .map(|c| (c.change_id.clone(), c))
+            .map(|c| (c.change.change_id.clone(), c))
             .collect();
         for change in plan.full_changes() {
             let stored = change_map.remove(&change.id);
@@ -42,7 +51,7 @@ impl Registry {
                 if !change_map.is_empty() {
                     eprintln!("Warning: found unknown changes");
                     for (change_id, change) in change_map {
-                        eprintln!("{change_id} {}", change.change);
+                        eprintln!("{change_id} {}", change.change.name);
                     }
                 }
                 return Ok(Some(change));
@@ -101,17 +110,37 @@ impl Registry {
 
 #[derive(Clone, Debug, sqlx::FromRow)]
 #[expect(dead_code)]
+struct EventRow {
+    event: Event,
+    #[sqlx(flatten)]
+    change: Change,
+
+    requires: String,
+    conflicts: String,
+    tags: String,
+}
+
+#[derive(Clone, Debug, sqlx::FromRow)]
+#[expect(dead_code)]
 struct ChangeRow {
-    pub change_id: String,
-    pub script_hash: Option<String>,
+    #[sqlx(flatten)]
+    change: Change,
+    script_hash: Option<String>,
+}
+
+#[derive(Clone, Debug, sqlx::FromRow)]
+#[expect(dead_code)]
+struct Change {
+    change_id: String,
     /// Name of the change
-    pub change: String,
-    pub project: String,
-    pub note: String,
-    pub committed_at: DateTime<Utc>,
-    pub committer_name: String,
-    pub committer_email: String,
-    pub planned_at: DateTime<Utc>,
-    pub planner_name: String,
-    pub planner_email: String,
+    #[sqlx(rename = "change")]
+    name: String,
+    project: String,
+    note: String,
+    committed_at: DateTime<Utc>,
+    committer_name: String,
+    committer_email: String,
+    planned_at: DateTime<Utc>,
+    planner_name: String,
+    planner_email: String,
 }
