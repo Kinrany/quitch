@@ -115,36 +115,6 @@ impl Cli {
     }
 }
 
-/// Validate a registry against a plan.
-///
-/// Return the first undeployed change in the plan, if any.
-async fn validate_against_plan(
-    registry: &MySqlPool,
-    plan: &Plan,
-) -> anyhow::Result<Option<FullChange>> {
-    let change_rows: Vec<ChangeRow> = sqlx::query_as("select * from `changes`")
-        .fetch_all(registry)
-        .await?;
-    let mut change_map: HashMap<_, _> = change_rows
-        .into_iter()
-        .map(|c| (c.change_id.clone(), c))
-        .collect();
-    for change in plan.full_changes() {
-        let stored = change_map.remove(&change.id);
-        if stored.is_none() {
-            if !change_map.is_empty() {
-                eprintln!("Warning: found unknown changes");
-                for (change_id, change) in change_map {
-                    eprintln!("{change_id} {}", change.change);
-                }
-            }
-            return Ok(Some(change));
-        }
-    }
-
-    Ok(None)
-}
-
 async fn connect_db(config: &ClientConfig) -> anyhow::Result<MySqlPool> {
     let target = format_connection_string(config);
     eprintln!("Connecting to {target}");
@@ -182,7 +152,7 @@ async fn create_schema_if_not_exists(pool: &MySqlPool, schema_name: &str) -> any
 async fn connect(
     args: ClientConfig,
     registry_name: String,
-) -> anyhow::Result<(MySqlPool, MySqlPool)> {
+) -> anyhow::Result<(MySqlPool, Registry)> {
     let db_client = connect_db(&args).await?;
 
     // Create a schema for the registry if it doesn't exist
@@ -196,56 +166,114 @@ async fn connect(
     };
     let registry_client = connect_db(&registry_args).await?;
 
+    let registry = Registry {
+        pool: registry_client,
+    };
+
     // Apply the schema if the registry is newly created
     if must_apply_registry_schema {
+        registry.apply_schema().await?;
+    }
+
+    Ok((db_client, registry))
+}
+
+#[derive(Debug, sqlx::Type)]
+#[sqlx(rename_all = "lowercase")]
+enum Event {
+    Deploy,
+    Fail,
+    Merge,
+    Revert,
+}
+
+struct Registry {
+    pool: MySqlPool,
+}
+impl Registry {
+    async fn apply_schema(&self) -> anyhow::Result<()> {
         eprintln!("Applying registry schema");
         static SCHEMA: &str = include_str!("./registry_schema.sql");
-        registry_client
+        self.pool
             .execute_many(SCHEMA)
             .take_while(|r| ready(r.is_ok()))
             .for_each(|_| ready(()))
             .await;
+        Ok(())
     }
 
-    Ok((db_client, registry_client))
-}
+    /// Validate the contents of the registry against a plan.
+    ///
+    /// Return the first undeployed change in the plan, if any.
+    async fn validate_against_plan(&self, plan: &Plan) -> anyhow::Result<Option<FullChange>> {
+        let change_rows: Vec<ChangeRow> = sqlx::query_as("select * from `changes`")
+            .fetch_all(&self.pool)
+            .await?;
+        let mut change_map: HashMap<_, _> = change_rows
+            .into_iter()
+            .map(|c| (c.change_id.clone(), c))
+            .collect();
+        for change in plan.full_changes() {
+            let stored = change_map.remove(&change.id);
+            if stored.is_none() {
+                if !change_map.is_empty() {
+                    eprintln!("Warning: found unknown changes");
+                    for (change_id, change) in change_map {
+                        eprintln!("{change_id} {}", change.change);
+                    }
+                }
+                return Ok(Some(change));
+            }
+        }
 
-async fn log_registry_event(
-    event_type: &str,
-    registry: &MySqlPool,
-    change: &FullChange,
-    project: &str,
-) -> anyhow::Result<()> {
-    sqlx::query(
-        "insert into `events` (
-            `event`, `change_id`, `change`, `project`, `note`,
-            `requires`, `conflicts`, `tags`,
-            `committed_at`, `committer_name`, `committer_email`,
-            `planned_at`, `planner_name`, `planner_email`
-        ) values (
-            ?, ?, ?, ?, ?,
-            '', '', '',
-            ?, ?, ?,
-            ?, ?, ?
-        )",
-    )
-    // Change
-    .bind(event_type)
-    .bind(&change.id)
-    .bind(&change.change.name)
-    .bind(project)
-    .bind(&change.change.note)
-    // Committer
-    .bind(chrono::Utc::now())
-    .bind("quitch")
-    .bind("quitch@quitch")
-    // Planner
-    .bind(change.change.date)
-    .bind(&change.change.planner)
-    .bind(&change.change.planner)
-    .execute(registry)
-    .await?;
-    Ok(())
+        Ok(None)
+    }
+
+    async fn add_event(
+        &self,
+        event: Event,
+        change: &FullChange,
+        project: &str,
+    ) -> anyhow::Result<()> {
+        sqlx::query(
+            "insert into `events` (
+                `event`, `change_id`, `change`, `project`, `note`,
+                `requires`, `conflicts`, `tags`,
+                `committed_at`, `committer_name`, `committer_email`,
+                `planned_at`, `planner_name`, `planner_email`
+            ) values (
+                ?, ?, ?, ?, ?,
+                '', '', '',
+                ?, ?, ?,
+                ?, ?, ?
+            )",
+        )
+        // Change
+        .bind(event)
+        .bind(&change.id)
+        .bind(&change.change.name)
+        .bind(project)
+        .bind(&change.change.note)
+        // Committer
+        .bind(chrono::Utc::now())
+        .bind("quitch")
+        .bind("quitch@quitch")
+        // Planner
+        .bind(change.change.date)
+        .bind(&change.change.planner)
+        .bind(&change.change.planner)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn delete_change(&self, change_id: &str) -> anyhow::Result<()> {
+        sqlx::query("delete from `changes` where change_id = ?")
+            .bind(change_id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
 }
 
 #[tokio::main]
@@ -258,7 +286,7 @@ async fn main() -> anyhow::Result<()> {
     let (db, registry) = connect(common_args.connection_options, common_args.registry).await?;
 
     // Make sure the registry is in a valid state
-    let first_undeployed_change = validate_against_plan(&registry, &plan).await?;
+    let first_undeployed_change = registry.validate_against_plan(&plan).await?;
 
     // Find the last deployed change
     let last_deployed_change_id = if let Some(change) = first_undeployed_change {
@@ -297,16 +325,17 @@ async fn main() -> anyhow::Result<()> {
             .take_while(|r| ready(r.is_ok()))
             .for_each(|_| ready(()))
             .await;
-        sqlx::query("delete from `changes` where change_id = ?")
-            .bind(&change.id)
-            .execute(&registry)
+        registry.delete_change(&change.id).await?;
+        registry
+            .add_event(Event::Revert, &change, plan.project())
             .await?;
-        log_registry_event("revert", &registry, &change, plan.project()).await?;
         anyhow::Ok(())
     };
     if let Err(error) = revert_the_change.await {
         eprintln!("Failed to revert");
-        log_registry_event("revert", &registry, &last_deployed_change, plan.project()).await?;
+        registry
+            .add_event(Event::Revert, &last_deployed_change, plan.project())
+            .await?;
         return Err(error);
     }
     Ok(())
