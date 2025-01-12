@@ -1,28 +1,20 @@
 mod change;
+mod mysql_target;
 mod plan;
 mod registry;
 
-use std::{collections::HashMap, future::ready, path::Path};
+use std::{future::ready, path::Path};
 
-use anyhow::{anyhow, bail};
+use anyhow::bail;
 use clap::Parser;
 use futures::StreamExt;
+use mysql_target::MysqlTarget;
 use sqlx::{Executor, MySqlPool};
-use url::Url;
 
 use self::{
     plan::{FullChange, Plan},
-    registry::ChangeRow,
+    registry::Registry,
 };
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct ClientConfig {
-    username: String,
-    password: String,
-    hostname: String,
-    port: u16,
-    db: String,
-}
 
 async fn load_plan(plan_file_path: &str) -> anyhow::Result<Plan> {
     eprintln!("Using plan file {plan_file_path}");
@@ -47,80 +39,37 @@ fn format_plan_change(plan: &Plan, change_name: &str) -> anyhow::Result<String> 
     }
 }
 
-fn parse_connection_string(s: &str) -> anyhow::Result<ClientConfig> {
-    let url = Url::parse(s)?;
-
-    if url.scheme() != "mysql" {
-        bail!("only mysql is supported");
-    }
-
-    Ok(ClientConfig {
-        hostname: url
-            .host()
-            .ok_or_else(|| anyhow!("missing hostname"))?
-            .to_string(),
-        port: url.port().unwrap_or(3306),
-        username: url.username().to_string(),
-        password: url
-            .password()
-            .ok_or_else(|| anyhow!("missing password"))?
-            .to_string(),
-        db: url.path().trim_start_matches('/').to_string(),
-    })
-}
-
-fn format_connection_string(opts: &ClientConfig) -> String {
-    let ClientConfig {
-        username,
-        password,
-        hostname,
-        port,
-        db,
-    } = opts;
-    format!("mysql://{username}:{password}@{hostname}:{port}/{db}")
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, clap::Parser)]
 struct CommonArgs {
+    #[clap(long, default_value = "sqitch")]
     registry: String,
+    #[clap(long, default_value = "sqitch.plan")]
     plan_file: String,
-    connection_options: ClientConfig,
+    #[clap(long)]
+    target: MysqlTarget,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, clap::Parser)]
-enum Cli {
-    #[clap(rename_all = "kebab-case")]
-    Revert {
-        #[clap(long, default_value = "sqitch")]
-        registry: String,
-        #[clap(long, default_value = "sqitch.plan")]
-        plan_file: String,
-        #[clap(long)]
-        target: String,
-    },
-}
-impl Cli {
-    fn parse_common_args(self) -> anyhow::Result<CommonArgs> {
-        match self {
-            Self::Revert {
-                registry,
-                plan_file,
-                target,
-            } => Ok(CommonArgs {
-                registry,
-                plan_file,
-                connection_options: parse_connection_string(&target)?,
-            }),
-        }
-    }
+#[clap(rename_all = "kebab-case")]
+struct Cli {
+    #[clap(flatten)]
+    common_args: CommonArgs,
+
+    #[clap(subcommand)]
+    cmd: Command,
 }
 
-async fn connect_db(config: &ClientConfig) -> anyhow::Result<MySqlPool> {
-    let target = format_connection_string(config);
+#[derive(Clone, Debug, PartialEq, Eq, clap::Parser)]
+enum Command {
+    Revert,
+    Deploy,
+}
+
+async fn connect_db(target: &MysqlTarget) -> anyhow::Result<MySqlPool> {
     eprintln!("Connecting to {target}");
-    let pool = MySqlPool::connect(&target).await?;
+    let pool = MySqlPool::connect(&target.to_string()).await?;
     pool.execute("select 1").await?;
-    eprintln!("Connected to {}", config.db);
+    eprintln!("Connected to {}", target.db);
     Ok(pool)
 }
 
@@ -150,7 +99,7 @@ async fn create_schema_if_not_exists(pool: &MySqlPool, schema_name: &str) -> any
 
 /// Connect to the main database and the registry
 async fn connect(
-    args: ClientConfig,
+    args: MysqlTarget,
     registry_name: String,
 ) -> anyhow::Result<(MySqlPool, Registry)> {
     let db_client = connect_db(&args).await?;
@@ -160,15 +109,13 @@ async fn connect(
         create_schema_if_not_exists(&db_client, &registry_name).await?;
 
     // Create the registry connection
-    let registry_args = ClientConfig {
+    let registry_args = MysqlTarget {
         db: registry_name,
         ..args
     };
     let registry_client = connect_db(&registry_args).await?;
 
-    let registry = Registry {
-        pool: registry_client,
-    };
+    let registry = Registry::new(registry_client);
 
     // Apply the schema if the registry is newly created
     if must_apply_registry_schema {
@@ -187,103 +134,16 @@ enum Event {
     Revert,
 }
 
-struct Registry {
-    pool: MySqlPool,
-}
-impl Registry {
-    async fn apply_schema(&self) -> anyhow::Result<()> {
-        eprintln!("Applying registry schema");
-        static SCHEMA: &str = include_str!("./registry_schema.sql");
-        self.pool
-            .execute_many(SCHEMA)
-            .take_while(|r| ready(r.is_ok()))
-            .for_each(|_| ready(()))
-            .await;
-        Ok(())
-    }
-
-    /// Validate the contents of the registry against a plan.
-    ///
-    /// Return the first undeployed change in the plan, if any.
-    async fn validate_against_plan(&self, plan: &Plan) -> anyhow::Result<Option<FullChange>> {
-        let change_rows: Vec<ChangeRow> = sqlx::query_as("select * from `changes`")
-            .fetch_all(&self.pool)
-            .await?;
-        let mut change_map: HashMap<_, _> = change_rows
-            .into_iter()
-            .map(|c| (c.change_id.clone(), c))
-            .collect();
-        for change in plan.full_changes() {
-            let stored = change_map.remove(&change.id);
-            if stored.is_none() {
-                if !change_map.is_empty() {
-                    eprintln!("Warning: found unknown changes");
-                    for (change_id, change) in change_map {
-                        eprintln!("{change_id} {}", change.change);
-                    }
-                }
-                return Ok(Some(change));
-            }
-        }
-
-        Ok(None)
-    }
-
-    async fn add_event(
-        &self,
-        event: Event,
-        change: &FullChange,
-        project: &str,
-    ) -> anyhow::Result<()> {
-        sqlx::query(
-            "insert into `events` (
-                `event`, `change_id`, `change`, `project`, `note`,
-                `requires`, `conflicts`, `tags`,
-                `committed_at`, `committer_name`, `committer_email`,
-                `planned_at`, `planner_name`, `planner_email`
-            ) values (
-                ?, ?, ?, ?, ?,
-                '', '', '',
-                ?, ?, ?,
-                ?, ?, ?
-            )",
-        )
-        // Change
-        .bind(event)
-        .bind(&change.id)
-        .bind(&change.change.name)
-        .bind(project)
-        .bind(&change.change.note)
-        // Committer
-        .bind(chrono::Utc::now())
-        .bind("quitch")
-        .bind("quitch@quitch")
-        // Planner
-        .bind(change.change.date)
-        .bind(&change.change.planner)
-        .bind(&change.change.planner)
-        .execute(&self.pool)
-        .await?;
-        Ok(())
-    }
-
-    async fn delete_change(&self, change_id: &str) -> anyhow::Result<()> {
-        sqlx::query("delete from `changes` where change_id = ?")
-            .bind(change_id)
-            .execute(&self.pool)
-            .await?;
-        Ok(())
-    }
-}
-
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     eprintln!("Reverting only the last change by default");
 
     // Initial setup
-    let common_args = Cli::parse().parse_common_args()?;
+    let cli = Cli::parse();
+    let common_args = cli.common_args;
+    let _cmd = cli.cmd;
     let plan = load_plan(&common_args.plan_file).await?;
-    let (db, registry) = connect(common_args.connection_options, common_args.registry).await?;
+    let (db, registry) = connect(common_args.target, common_args.registry).await?;
 
     // Make sure the registry is in a valid state
     let first_undeployed_change = registry.validate_against_plan(&plan).await?;
@@ -346,58 +206,31 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_parse_connection_string() {
-        assert_eq!(
-            parse_connection_string("mysql://user:pass@localhost:3306/dbname").unwrap(),
-            ClientConfig {
-                username: "user".to_string(),
-                password: "pass".to_string(),
-                hostname: "localhost".to_string(),
-                port: 3306,
-                db: "dbname".to_string(),
-            }
-        );
-    }
-
-    #[test]
-    fn test_format_connection_string() {
-        assert_eq!(
-            format_connection_string(&ClientConfig {
-                username: "user".into(),
-                password: "pass".into(),
-                hostname: "localhost".into(),
-                port: 3306,
-                db: "dbname".into(),
-            }),
-            "mysql://user:pass@localhost:3306/dbname"
-        );
-    }
-
-    #[test]
     fn test_parse_common_args() {
         assert_eq!(
             Cli::parse_from([
                 "quitch",
-                "revert",
                 "--target",
                 "mysql://user:pass@localhost:3306/dbname",
                 "--registry",
                 "quitch",
                 "--plan-file",
                 "./quitch.plan",
-            ])
-            .parse_common_args()
-            .unwrap(),
-            CommonArgs {
-                registry: "quitch".to_string(),
-                plan_file: "./quitch.plan".to_string(),
-                connection_options: ClientConfig {
-                    username: "user".to_string(),
-                    password: "pass".to_string(),
-                    hostname: "localhost".to_string(),
-                    port: 3306,
-                    db: "dbname".to_string(),
+                "revert",
+            ]),
+            Cli {
+                common_args: CommonArgs {
+                    registry: "quitch".to_string(),
+                    plan_file: "./quitch.plan".to_string(),
+                    target: MysqlTarget {
+                        username: "user".to_string(),
+                        password: "pass".to_string(),
+                        hostname: "localhost".to_string(),
+                        port: 3306,
+                        db: "dbname".to_string(),
+                    },
                 },
+                cmd: Command::Revert
             }
         );
     }
