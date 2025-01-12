@@ -48,6 +48,11 @@ struct CommonArgs {
     #[clap(long)]
     target: MysqlTarget,
 }
+impl CommonArgs {
+    fn top_dir(&self) -> &Path {
+        Path::new(&self.plan_file).parent().expect("plan_dir")
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Eq, clap::Parser)]
 #[clap(rename_all = "kebab-case")]
@@ -134,17 +139,12 @@ enum Event {
     Revert,
 }
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    eprintln!("Reverting only the last change by default");
-
-    // Initial setup
-    let cli = Cli::parse();
-    let common_args = cli.common_args;
-    let _cmd = cli.cmd;
-    let plan = load_plan(&common_args.plan_file).await?;
-    let (db, registry) = connect(common_args.target, common_args.registry).await?;
-
+async fn revert(
+    db: &MySqlPool,
+    registry: &Registry,
+    plan: Plan,
+    top_dir: &Path,
+) -> anyhow::Result<()> {
     // Make sure the registry is in a valid state
     let first_undeployed_change = registry.validate_against_plan(&plan).await?;
 
@@ -170,10 +170,7 @@ async fn main() -> anyhow::Result<()> {
 
     // Get the script corresponding to reverting the last deployed change
     eprintln!("Reverting {}", last_deployed_change.change.name);
-    let plan_dir = Path::new(&common_args.plan_file)
-        .parent()
-        .expect("plan_dir");
-    let revert_path = plan_dir
+    let revert_path = top_dir
         .join("revert")
         .join(format!("{}.sql", last_deployed_change.name()));
     let revert_sql = tokio::fs::read_to_string(&revert_path).await?;
@@ -198,6 +195,27 @@ async fn main() -> anyhow::Result<()> {
             .await?;
         return Err(error);
     }
+
+    Ok(())
+}
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    eprintln!("Reverting only the last change by default");
+
+    // Initial setup
+    let cli = Cli::parse();
+    let top_dir = cli.common_args.top_dir().to_path_buf();
+    let plan = load_plan(&cli.common_args.plan_file).await?;
+    let (db, registry) = connect(cli.common_args.target, cli.common_args.registry).await?;
+
+    match cli.cmd {
+        Command::Revert => {
+            revert(&db, &registry, plan, &top_dir).await?;
+        }
+        Command::Deploy => unimplemented!(),
+    }
+
     Ok(())
 }
 
